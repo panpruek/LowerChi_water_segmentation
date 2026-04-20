@@ -1,0 +1,89 @@
+import os
+import re
+from glob import glob
+from PIL import Image
+
+# ================= 1. CONFIGURATION =================
+# 🎯 โฟลเดอร์หลักที่เก็บไฟล์ภาพใหญ่ (ชื่อไฟล์อะไรก็ได้)
+BASE_DIR = r"E:\Project_Panpruek\2_Time_Series_Production\02_Pool_WaterMasks"
+#E:\Project_Panpruek\1_Time_Series_Production\02_Pool_WaterMasks
+# E:\Project_Panpruek\1_OnlyS1Time_Series_ProductionOld\02_Pool_WaterMasks
+# E:\Project_Panpruek\DataFullyear\S1_Processed\rgb
+# E:\Project_Panpruek\DataFullyear\S2_Processed\ndwi
+OUTPUT_DIR = r"E:\Project_Panpruek\2_Time_Series_Production\Patches\Binary_y7360_x8740"
+
+# 🎯 ระบุ Path ของ "ไฟล์ต้นแบบเพียงไฟล์เดียว" เพื่อดึงพิกัดเป้าหมาย
+REFERENCE_FILE_PATH = r"E:\Project_Panpruek\Data\Sen-122\02Processed\Flood\zone_D\water patch folder\image\Sen1_CloudedFlood1_RGB_y7360_x8740.png"
+# E:\Project_Panpruek\Data\Sen-122\02Processed\Flood\zone_C\water patch folder\image\Sen2_Flood_NDWI_y4600_x5520.png
+# E:\Project_Panpruek\Data\Sen-122\02Processed\Flood\zone_D\water patch folder\image\Sen1_CloudedFlood1_RGB_y7360_x8740.png
+# 🎯 ขนาดของแพตช์ที่ต้องการ
+PATCH_SIZE = 512 
+
+Image.MAX_IMAGE_PIXELS = None 
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+def extract_coords_from_filename(filename):
+    """ฟังก์ชันใช้ Regex ดึงพิกัด Y และ X จากชื่อไฟล์"""
+    match = re.search(r'y(\d+)_x(\d+)', filename, re.IGNORECASE)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    return None, None
+
+def generate_individual_ablation_patches():
+    print(f"[*] กำลังดึงข้อมูลพิกัดจากไฟล์ต้นแบบ: {os.path.basename(REFERENCE_FILE_PATH)}")
+    
+    ref_filename = os.path.basename(REFERENCE_FILE_PATH)
+    target_y, target_x = extract_coords_from_filename(ref_filename)
+    
+    if target_y is None or target_x is None:
+        print("[!] Error: ไม่พบรูปแบบพิกัด (เช่น y4600_x5520) ในชื่อไฟล์ต้นแบบ")
+        return
+        
+    print(f"[*] พิกัดเป้าหมาย: Y={target_y}, X={target_x} (ขนาด {PATCH_SIZE}x{PATCH_SIZE})")
+    
+    # 1. ค้นหาไฟล์ภาพ .png ทุกไฟล์ (ชื่ออะไรก็ได้) ใน BASE_DIR และโฟลเดอร์ย่อย
+    search_pattern = os.path.join(BASE_DIR, "**", "*.png")
+    large_mask_files = glob(search_pattern, recursive=True)
+    
+    if not large_mask_files:
+        print(f"[!] ไม่พบไฟล์ .png ใดๆ เลยใน {BASE_DIR}")
+        return
+        
+    print(f"[*] พบไฟล์ภาพใหญ่ทั้งหมด {len(large_mask_files)} ไฟล์ กำลังดำเนินการตัด...")
+    print("-" * 50)
+
+    total_success = 0
+    crop_box = (target_x, target_y, target_x + PATCH_SIZE, target_y + PATCH_SIZE)
+
+    # ================= 2. ลูปหลัก: ประมวลผลทีละภาพใหญ่ =================
+    for file_path in large_mask_files:
+        original_filename = os.path.basename(file_path)
+        base_name, ext = os.path.splitext(original_filename)
+        
+        try:
+            with Image.open(file_path) as large_img:
+                img_w, img_h = large_img.size
+                
+                if img_w >= crop_box[2] and img_h >= crop_box[3]:
+                    cropped_img = large_img.crop(crop_box)
+                    
+                    # สร้างชื่อไฟล์: ชื่อไฟล์เดิม_y(พิกัด)_x(พิกัด).png
+                    output_filename = f"{base_name}_y{target_y}_x{target_x}{ext}"
+                    output_path = os.path.join(OUTPUT_DIR, output_filename)
+                    
+                    cropped_img.save(output_path)
+                    total_success += 1
+                    print(f"  [+] Saved: {output_filename}")
+                else:
+                    print(f"  [-] Skipped: ภาพใหญ่ {original_filename} เล็กกว่าพิกัดที่ระบุ")
+                        
+        except Exception as e:
+            print(f"  [Error] เกิดปัญหาขณะประมวลผลไฟล์ {file_path}: {e}")
+
+    print("-" * 50)
+    print(f"\n[SUCCESS] ดำเนินการเสร็จสิ้น!")
+    print(f"ตัดภาพและบันทึกสำเร็จรวมทั้งหมด {total_success} ภาพ")
+    print(f"ไฟล์ถูกเก็บไว้ที่:\n{OUTPUT_DIR}")
+
+if __name__ == "__main__":
+    generate_individual_ablation_patches()
